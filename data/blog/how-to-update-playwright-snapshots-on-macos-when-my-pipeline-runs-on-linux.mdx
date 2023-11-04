@@ -1,0 +1,88 @@
+---
+title: how to update playwright snapshots on macos when my pipeline runs on linux?
+date: '2023-11-01'
+tags: ['javascript', 'docker']
+draft: true
+summary: Playwright compare snapshots with the same operating system and browsers. Your pipeline runs on linux and you on macos. You would like to run your playwright tests in your pipeline but your snapshots generated on your mac are unusable by the pipeline. What to do? Use docker. 
+---
+
+You would like to make open-source contributions but don't know how to do it?
+Let me show you a real world example : the MDN documentation
+
+## Find the issue
+
+Go here and pick an issue from the MDN/content repository :
+
+- [good first issue](https://github.com/mdn/content/labels/good%20first%20issue)
+- [small efforts issue](https://github.com/mdn/content/labels/Effort%3A%20small)
+
+or check the MDN/translation-content repository issues for the languages you master, [here is the french one](https://github.com/mdn/translated-content/issues?q=is%3Aissue+is%3Aopen+label%3Al10n-fr).
+All you have to do is change the search from :
+
+```
+is:issue is:open label:l10n-fr 
+```
+
+to 
+
+```
+is:issue is:open label:l10n-[your language code here] 
+```
+
+You can find the [full list of labels here](https://github.com/mdn/translated-content/labels), just click on the one you want.
+
+I guess the easiest is the translation issues.
+
+
+## Clone the repository
+
+Go to the code tab of the repository where you found your issue.
+- [content repository](https://github.com/mdn/content)
+- [translation repository](https://github.com/mdn/translated-content)
+
+In my case I work on the translation-content repository.
+
+Then, click on this beautiful fork button middle top right of the page
+
+![fork button](/static/images/fork_mdn_translated-content.png)
+
+Now, you should get into a page with a button "Create fork", press this bad boy.
+
+
+It redirects me to :
+
+```
+https://github.com/[your github username]/translated-content
+```
+
+Now clone the repository on your machine:
+
+For translation-content repository :
+
+SSH:
+```bash
+git clone git@github.com:[your github username]/translated-content.git
+```
+
+or
+
+HTTP:
+```bash
+git clone https://github.com/[your github username]/translated-content.git
+```
+
+Open it with your favorite editor:
+```bash
+code translated-content
+```
+
+source: 
+- https://github.com/BenjaminLesne/translated-content/blob/main/CONTRIBUTING.md
+- https://github.com/mdn/content/blob/main/CONTRIBUTING.md
+- https://github.com/BenjaminLesne/translated-content/blob/main/docs/README.md
+
+## Follow the guidelines
+
+https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines
+
+the sumary for you that begins :

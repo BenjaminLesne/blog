@@ -1,38 +1,177 @@
 ---
 title: How to contribute to MDN?
 date: '2023-10-19'
-tags: ['JavaScript', "open-source"]
+tags: ['javascript', "open-source"]
 draft: true
-summary: Example of a markdown file with code blocks and syntax highlighting
+summary: The easiest way to contribute to open-source is by translating a documentation. Let me guide you through it :) 
 ---
 
-A sample post with markdown.
+## Find the issue
 
-## Inline Highlighting
+[Pick an easy issue that excites you in the content repository of MDN](https://github.com/mdn/content/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22%2C%22effort%3A+small%22+).
 
-Sample of inline highlighting `sum = parseInt(num1) + parseInt(num2)`
+[For example, here is the one I did](https://github.com/mdn/content/issues/27887)
 
-## Code Blocks
 
-Some Javascript code
+## Setup the project on your machine
 
-```javascript
-var num1, num2, sum
-num1 = prompt('Enter first number')
-num2 = prompt('Enter second number')
-sum = parseInt(num1) + parseInt(num2) // "+" means "add"
-alert('Sum = ' + sum) // "+" means combine into a string
+For your information, this blog post is based on [the MDN official guidelines](https://github.com/mdn/content/blob/main/CONTRIBUTING.md)
+
+### Clone the repository
+
+[Go to the MDN/content repository](https://github.com/mdn/content)
+
+Then, click on this beautiful fork button middle top right of the page
+
+![fork button](/static/images/fork_mdn_content.png)
+
+Now, you should get into a page with a button `Create fork`, press this bad boy.
+
+
+It should redirects you to :
+
+```
+https://github.com/[your github username]/content
 ```
 
-Some Python code 🐍
+Now clone the repository on your machine:
 
-```python
-def fib():
-    a, b = 0, 1
-    while True:            # First iteration:
-        yield a            # yield 0 to start with and then
-        a, b = b, a + b    # a will now be 1, and b will also be 1, (0 + 1)
 
-for index, fibonacci_number in zip(range(10), fib()):
-     print('{i:3}: {f:3}'.format(i=index, f=fibonacci_number))
+- with SSH:
+```bash
+cd folder/of/your/choice/content
+yarn
+yarn start  
+git clone git@github.com:[your github username]/content.git
 ```
+
+or
+
+- with HTTP:
+```bash
+cd folder/of/your/choice/content
+yarn
+yarn start 
+git clone https://github.com/[your github username]/content.git
+```
+
+### Install dependencies
+
+I assume that you have yarn and node installed already, if not :
+
+<details>
+<summary>click here</summary>
+
+
+The easy way to install node for windows and macos is [this page](https://nodejs.org/en/download).
+
+For linux : using your package manager seems easier. From there, good luck 🫡
+
+For more info see the [official node documentation](https://nodejs.org/en/learn/getting-started/how-to-install-nodejs)
+
+Now you can install yarn like this :
+
+```bash
+npm install --global yarn
+```
+
+More [info to install yarn here](https://classic.yarnpkg.com/lang/en/docs/install/)
+
+</details>
+
+Now cd to the repository you just cloned, install the dependencies with yarn and start the server :
+
+```bash
+cd folder/of/your/choice/content
+yarn install
+yarn start 
+```
+
+Now, if you go to [http://localhost:5042/](http://localhost:5042/) you should see the MDN documentation
+
+
+## How to edit files
+
+Your are supposed to have read the following before doing any change :
+
+- [writing guidelines](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines)
+- [Writing style guide](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Writing_style_guide)
+- [How to write markdowns in MDN](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Howto/Markdown_in_MDN)
+
+These are verbose no one wants to read that...
+
+So, since your are probably doing a `small effort` issue that require a small amount of changes, you can code first and then read the parts you need with the changes you made.
+And I guess you good, worst scenario you change the few lines you added 🤷
+
+Tip: If the page you are supposed to fix is :
+
+```plaintext
+https://developer.mozilla.org/en-US/docs/Web/JavaScript
+```
+
+then you know that the path to the file you have to work on is :
+
+```plaintext
+rootFolder/files/en-us/docs/web/javascript
+```
+
+## And then?!
+
+All you have to do is push your changes. (don't forget to check the writing guidelines)
+
+```bash
+git add .
+git commit -m "fix stuff"
+git push
+```
+You might need to `git push --set-upstream origin [your branch name]` if you haven't pushed this branch before.
+
+Now, go to your forked repository:
+```plaintext
+https://github.com/[your github username]/content
+```
+
+And click on "Compare & pull request"
+
+![forked MDN content repository](/static/images/compare-pull-request-from-fork-mdn-content.png)
+
+You should get into a page with a description prefilled with :
+
+```markdown
+<!-- 🙌 Thanks for contributing to MDN Web Docs. Adding details below will help us to merge your PR faster. -->
+
+### Description
+
+<!-- ✍️ Summarize your changes in one or two sentences -->
+
+### Motivation
+
+<!-- ❓ Why are you making these changes and how do they help readers? -->
+
+### Additional details
+
+<!-- 🔗 Link to release notes, vendor docs, bug trackers, source control, or other places providing more context -->
+
+### Related issues and pull requests
+
+<!-- 🔨 If this fully resolves a GitHub issue, use "Fixes #123" -->
+<!-- 👉 Highlight related pull requests using "Relates to #123" -->
+<!-- ❗ If another pull request should be merged first, use "**Depends on:** #123" -->
+
+
+<!-- 👷‍♀️ After submitting, go to the "Checks" tab of your PR for the build status -->
+
+```
+
+When everything is good, the title, the description, the changes and also that the pull request is from your branch TO the base repository MDN/content (this should be set automatically).
+
+Click `create pull request` and you good. Congrats you made your first pull request to an open-source project.
+Now keep an eye for any comment or approval from the MDN team (they usually show do it in few hours or the next day).
+
+This contribution is one of the ingredients to make your resume shine.
+If you are interested I wrote a post on [How to find your first dev job](http://localhost:3000/blog/How-to-find-your-first-dev-job).
+
+That's it. Bye. 👋
+
+sources: 
+- https://github.com/mdn/content/blob/main/CONTRIBUTING.md
