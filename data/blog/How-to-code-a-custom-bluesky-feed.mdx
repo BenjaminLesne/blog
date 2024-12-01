@@ -64,7 +64,6 @@ touch tsconfig.json
 
 ```bash
 mkdir src && echo 'console.log("hello world");' > src/server.ts
-
 ```
 
 - Install typescript, tsx to run the server.ts file and nodes types
@@ -201,7 +200,7 @@ Now we can add posts for our feed to the database. But first, we need an algorit
 
 ## Algorithm
 
-What we look for is posts talking about javascript and with embedded content (image, video, links, etc.)
+What we look for is posts talking about javascript and with embedded content (image, video, links, etc.). Also, we don't want NSFW labels (see [doc for more](https://docs.bsky.app/docs/advanced-guides/moderation#label-values)).
 
 - In your jetstream.ts file, add the following function:
 
@@ -210,7 +209,7 @@ import type { CommitCreate } from "@skyware/jetstream";
 import { BLACKLIST, KEYWORDS_REGEX } from "./constants.js";
 // ...rest of the imports
 
-const BLOCK_LIST = ['NSFW word1', 'NSFW word2']
+const BLOCK_LIST = ['check', 'doc', 'for', 'NSFW', 'labels']
 const ALLOWED_REGEX = /\bjavascript\b/i
 
 type StandardAlgoArgs = {
@@ -276,6 +275,98 @@ jetstream.onCreate("app.bsky.feed.post", (event) => {
   }
 });
 ```
+
+Now we have our database full of posts, we would like to return our posts when requested, let's make our api!
+
+## API
+
+Bluesky is going to hit the endpoint `/xrpc/app.bsky.feed.getFeedSkeleton` to retrieve the feed's posts. Let's make the endpoint with express.
+
+- install express 
+
+```bash
+npm install axios &&
+npm install --save-dev @types/express
+```
+
+- In server.ts, create the endpoint and return the last 10 posts:
+
+```ts
+import express from "express";
+import { db } from "./database/database.js";
+import { postsTable } from "./database/schemas.js";
+
+// ...rest of the code 
+
+const app = express();
+
+app.get("/xrpc/app.bsky.feed.getFeedSkeleton", async (req, res) => {
+  const feed = await db
+    .select({
+      post: postsTable.uri,
+    })
+    .from(postsTable)
+    .orderBy(desc(postsTable.interestScore))
+    .limit(10);
+
+  res.json({
+    feed,
+  });
+});
+
+app.listen(3000, () => {
+  console.log(`Feed app listening on port 3000`);
+});
+```
+
+When running tsx server.ts, you should be able to get your posts at http://localhost:3000/xrpc/app.bsky.feed.getFeedSkeleton
+
+Great, now our feed is alive but bluesky needs to know where our app is running. Prodiving http://localhost won't cut it, we have to deploy our app online. 
+
+## Deploy to a VPS
+
+I chose OVH as a hosting provider with [the Starter plan](https://www.ovhcloud.com/en-ie/vps)
+
+After paying I get by email: the ip address, password and user to connect with to the server.
+
+- Let's use ssh to access the VPS:
+
+```bash
+ssh myUser@127.0.0.1
+```
+
+It should ask for the password provided by email.
+
+Now, to make our life easier when deploying we are going to use Coolify.
+
+- Install coolify by running on your VPS:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash 
+```
+
+<details>
+  <summary>To fix "Please run this script as root or with sudo" click this text</summary>
+- Try again as root, to become root:  
+```bash
+su - root
+```
+
+- If you don't have the root password, you should be able to set one with:
+```bash
+sudo passwd root
+```
+</details>
+
+
+
+
+
+
+
+serverless and websocket how does it work?
+
+## publish
 
 
 
