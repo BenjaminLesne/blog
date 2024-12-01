@@ -1,0 +1,322 @@
+---
+title: How to code a custom bluesky feed?
+date: '2024-11-25'
+tags: ['javascript', "open-source"]
+draft: true
+summary: use your own algorithm for your feed
+---
+
+## Introduction
+
+I found the feed builders a bit limited so I wanted to build my own.
+I managed to find a [Feed Generator template](https://github.com/bluesky-social/feed-generator) but was completely lost in the code. This is why I decided to make my own from scratch!
+
+
+## TL;DR
+
+We are building this:
+
+![custom feed architecture](/static/images/bluesky-feed-architecture.png)
+
+
+## Setup the repository
+
+- Create a directory and initialize npm: 
+
+```bash
+mkdir my-custom-feed &&
+cd my-custom-feed &&
+npm init -y
+```
+
+- Create a tsconfig.json file:
+
+```bash
+touch tsconfig.json
+```
+
+- Paste the following config in the file:
+
+```json
+{
+  "compilerOptions": {
+    "lib": ["es2023"],
+    "module": "node16",
+    "target": "es2023",
+    "moduleResolution": "node16",
+    "removeComments": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noImplicitAny": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "checkJs": true
+  },
+  "include": [".eslintrc.cjs", "**/*.ts", "**/*.cjs", "**/*.js"],
+  "exclude": ["node_modules"]
+}
+```
+
+- Create the entry point of your app in the src directory and log out Hello world
+
+```bash
+mkdir src && echo 'console.log("hello world");' > src/server.ts
+
+```
+
+- Install typescript, tsx to run the server.ts file and nodes types
+
+```bash
+npm install --save-dev typescript tsx @types/node
+```
+
+- You should see "hello world" in the terminal when running:
+
+```bash
+tsx watch ./src/server.ts
+```
+
+## Connect to the jetstream
+
+Now, we need data. Let's connect to bluesky's jetstreams to get the newly created posts, likes, and more.
+
+- To connect to a jetstream, install @skyware/jetstream and ws:
+
+```bash
+npm install @skyware/jetstream ws &&
+npm install --save-dev @types/ws
+```
+
+- create a jetstream.ts file with the following content in the src directory:
+
+```ts
+import { Jetstream } from "@skyware/jetstream";
+import WebSocket from "ws";
+
+export const jetstream = new Jetstream({
+  wantedCollections: [
+  "app.bsky.feed.post",
+],
+  ws: WebSocket,
+});
+
+jetstream.onCreate("app.bsky.feed.post", (event) => {
+  console.log(event.commit.record)
+});
+```
+
+- Now, be ready to stop your server this is going to spam logs, start the jetstream in your server.ts
+
+```ts title={}
+import { jetstream } from "./jetstream.js";
+
+jetstream.start();
+```
+
+You should have crazy amount of logs poping in your terminal now.
+Good job, you succesffully connected to the jetstream 👍
+
+You can stop the server for now.
+Now that we have data, we need to store in our database only the data we are interested in.
+
+## Setup the database
+
+We will use [Drizzle](https://orm.drizzle.team/docs/overview) and SQLite (see [drizzle doc for sqlite](https://orm.drizzle.team/docs/get-started/sqlite-new)) but you can use whatever database you'd like.
+
+- Install the dependencies 
+
+```bash
+npm i drizzle-orm @libsql/client dotenv
+npm i -D drizzle-kit
+```
+
+- In your src directory, create a database directory and a local.db file to it:
+
+```bash
+mkdir src/database && touch src/database/schemas.ts
+```
+
+- create a .env file in your root directory and add your DATABASE_URL variable:
+
+```bash
+DATABASE_URL="file:src/database/local.db"
+```
+
+- load the env variablew with dotenv in your server.ts file by adding this import at the top of the file:
+
+```ts
+import 'dotenv/config';
+```
+
+- create a database.ts file in src/database directory and add the following content:
+
+```ts
+import { drizzle } from "drizzle-orm/libsql/node";
+
+export const db = drizzle({
+  connection: {
+    url: process.env.DATABASE_URL,
+  },
+});
+```
+
+- create a schema.ts file in your database directory with the following content:
+
+```ts
+import { int, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const postsTable = sqliteTable("posts", {
+  id: int().primaryKey({ autoIncrement: true }),
+  uri: text().notNull().unique(),
+  interestScore: int().notNull(),
+  createdAt: int({ mode: "timestamp" }),
+});
+```
+
+- Create a drizzle.config.ts file in the root of your project and add the following content:
+
+```ts
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  out: "./drizzle",
+  schema: "./src/database/schemas.ts",
+  dialect: "sqlite",
+  dbCredentials: {
+    url: process.env.DATABASE_URL,
+  },
+});
+```
+
+- Now apply the post schema to the local.db file:
+
+```bash
+npx drizzle-kit push
+```
+
+Now we can add posts for our feed to the database. But first, we need an algorithm to decide if we should store or not the post.
+
+## Algorithm
+
+What we look for is posts talking about javascript and with embedded content (image, video, links, etc.)
+
+- In your jetstream.ts file, add the following function:
+
+```ts
+import type { CommitCreate } from "@skyware/jetstream";
+import { BLACKLIST, KEYWORDS_REGEX } from "./constants.js";
+// ...rest of the imports
+
+const BLOCK_LIST = ['NSFW word1', 'NSFW word2']
+const ALLOWED_REGEX = /\bjavascript\b/i
+
+type StandardAlgoArgs = {
+  record: CommitCreate<"app.bsky.feed.post">["record"];
+};
+export function standardAlgo({ record }: StandardAlgoArgs) {
+  let score = 0;
+  let denied = false;
+
+  switch (record.$type) {
+    case "app.bsky.feed.post": {
+      record.labels?.values.forEach((value) => {
+        if (BLACKLIST.labels.includes(value.val)) {
+          denied = true;
+        }
+      });
+      if (denied) {
+        return 0;
+      }
+
+      const isAboutWebdev = ALLOWED_REGEX.test(record.text);
+      if (isAboutWebdev) {
+        score = score + 1;
+
+        if (record.embed) {
+          score = score + 1;
+        }
+      }
+
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return score;
+}
+
+// ... rest of the code
+```
+
+- Now, use the standardAlgo function to decide if we store the received post to the database:
+
+```ts
+import { db } from "./database/database.js";
+// ... rest of the imports
+
+// ...
+
+jetstream.onCreate("app.bsky.feed.post", (event) => {
+  const record = event.commit.record;
+  const interestScore = standardAlgo({ record });
+
+  if (interestScore > 0) {
+    const did = event.did;
+    const recordKey = event.commit.rkey;
+
+    await db.insert(postsTable).values({
+        interestScore,
+        uri: `at://${did}/app.bsky.feed.post/${recordKey}`,
+    });
+  }
+});
+```
+
+
+
+
+
+
+
+NOTES:
+
+coolify:
+sudo passwd root?
+then use root user to run the coolify bash command
+don't add your volumes in /app, it is not accessible
+setup project domain (web dev feed > https://api.webdevfeed.online)
+firefox prevent https access cause: self signed ssl certificate
+=> means domains name in project setting is https
+
+
+When publishing, error:
+Invalid app.bsky.feed.generator record: Record/did must be a valid did
+=> remove the http(s):// from the did
+
+
+could not resolve identity: did:web:boc48gookcswcoo884o0owck.167.114.2.165.sslip.io
+=> the did in /xrpc/app.bsky.feed.describeFeedGenerator or the id in /.well-known/did.json
+=> code throwing the error: https://github.com/bluesky-social/atproto/blob/53fcc2fbcbda9b325eeffb5705126831baf2a427/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L34
+=> your website need to be accessible on httpS:// (ssl needed)
+=> project may have not been redeployed when adding this https domain which didn't trigger a certificate generation?
+=> use https url in domain in project > domain
+=> restart the proxy servers > proxy > restart (may need 2 hours to make it work) + redeploy your app
+
+Message from server: invalid feed generator service details in did document: did:web:api.webdevfeed.online
+=> in /.well-known/did.json, the service return does not have the id "#bsky_fg" 
+=> source code: https://github.com/bluesky-social/atproto/blob/3303ff16a482a8dc6d31edc970398794184032d4/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47
+=> it is "bsky_fg" not "#bsky_fg" WRONG you need the #
+=> Bluesky may take a bit of time to access the updates of your feed (like the id update)
+
+How to debug?
+Use public endpoint from hoppscotch
+
+You need a domain name
+add the ip address of your server to your domain provider
+add the domain name to coolify
+
