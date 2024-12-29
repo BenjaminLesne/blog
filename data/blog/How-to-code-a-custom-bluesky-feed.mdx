@@ -382,6 +382,8 @@ Now we would like to return our posts when requested, let's make our api!
 
 ## API
 
+### `/xrpc/app.bsky.feed.getFeedSkeleton`
+
 Bluesky is going to hit the endpoint `/xrpc/app.bsky.feed.getFeedSkeleton` to retrieve the feed's posts. Let's make the endpoint with express.
 
 - install express
@@ -425,7 +427,119 @@ app.listen(3000, () => {
 
 When running tsx server.ts, you should be able to get your posts at http://localhost:3000/xrpc/app.bsky.feed.getFeedSkeleton
 
-Great, now our feed is alive but bluesky needs to know where our app is running. Prodiving http://localhost won't cut it, we have to deploy our app online. I'm not sure SQlite works with serverless so we are going for a VPS.
+Bluesky also need to make sure the feed requested is ours. To do so, bluesky hit two endpoints, let's make them! But first we need your handle and did.
+
+### Get your handle
+
+- Browse to https://bsky.app
+
+- Click on `profile` in the left navigation
+
+- Grab the handle
+
+On the page, below your username, your handle should be displayed, it looks like this:
+
+```text
+@johndoe.bsky.social
+```
+
+or in the url of the page:
+
+```url
+https://bsky.app/profile/johndoe.bsky.social
+```
+
+Copy the "johndoe" part of it.
+
+### Get your did
+
+- Paste the "johndoe" of your handle on [this website](https://bsky-did.neocities.org/)
+
+- click `get my did`
+
+It should display on the screen your did, it looks like this:
+
+```url
+did:plc:biu6j0lqrtpjfazvekg6zrah
+```
+
+- add the did to your .env
+
+```bash
+echo "PUBLISHER_DID='YOUR_DID'" >> .env
+```
+
+### Setup required variables
+
+We will have to provide info about the feed. To make things easier let's create two object to represent the feed generator and our feed.
+
+- Create a src/constants.ts file and add the following content:
+
+```ts
+export const FEED_GENERATOR = {
+  did: 'did:web:' + (process.env.HOSTNAME as string),
+} as const
+
+export const WEB_DEV_FEED = {
+  id: 'web-dev',
+  did: 'did:web:' + (process.env.HOSTNAME as string),
+  name: 'My feed name displayed to users',
+  description: 'This is my feed description that is visible in Bluesky',
+  rkey: 'web-dev',
+} as const
+```
+
+The only value you can't change here is the dids (unless you know what you are doing)
+
+- add a dumby `HOSTNAME` to your .env for now:
+
+```bash
+echo "HOSTNAME='https://my-hostname.com'" >> .env
+```
+
+### create API routes
+
+- add the following to your `server.ts` file:
+
+This allow bluesky to understand that we have a feed generator and that this feed generator provide one feed
+
+```ts
+// ...rest of the imports
+import { WEB_DEV_FEED, FEED_GENERATOR } from './contants.js'
+
+// ...
+
+app.get('/.well-known/did.json', (req, res) => {
+  res.json({
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: FEED_GENERATOR.did,
+    service: [
+      {
+        id: '#bsky_fg',
+        serviceEndpoint: process.env.API_URL as string,
+        type: 'BskyFeedGenerator',
+      },
+    ],
+  })
+})
+
+app.get('/xrpc/app.bsky.feed.describeFeedGenerator', (req, res) => {
+  res.json({
+    did: FEED_GENERATOR.did,
+    feeds: [
+      {
+        uri: `at://${process.env.PUBLISHER_DID as string}/app.bsky.feed.generator/${
+          WEB_DEV_FEED.recordKey
+        }`,
+      },
+    ],
+  })
+})
+
+// ...
+```
+
+Great, now our feed is alive, can be identified by Bluesky but is not accessible on the web. Time to deploy our app to a VPS!
 
 ## Deploy to a VPS
 
