@@ -13,6 +13,8 @@ I managed to find a [Feed Generator template](https://github.com/bluesky-social/
 
 ## TL;DR
 
+The repo is here: [LINK TO REPO TEMPLATE], read the readme to launch your feed asap.
+
 We are building this:
 
 ![custom feed architecture](/static/images/bluesky-feed-architecture.png)
@@ -200,7 +202,7 @@ export const db = drizzle(client)
 ```
 
 <details>
-<summary>Why do we enable WAL? (to know more click here)</summary>
+<summary>Why do we enable WAL? (click this text to see)</summary>
 
 By default, SQLite operates in a mode that locks the database during write operations, preventing simultaneous reads and writes. For example, if someone requests the feed while a new post is being written, the feed request would be blocked until the write operation finishes.
 
@@ -451,6 +453,8 @@ https://bsky.app/profile/johndoe.bsky.social
 
 Copy the "johndoe" part of it.
 
+Also keep the handle near by, we will use it to later to publish the feed
+
 ### Get your did
 
 - Paste the "johndoe" of your handle on [this website](https://bsky-did.neocities.org/)
@@ -469,9 +473,23 @@ did:plc:biu6j0lqrtpjfazvekg6zrah
 echo "PUBLISHER_DID='YOUR_DID'" >> .env
 ```
 
-### Setup required variables
+### Setup the required variables
 
 We will have to provide info about the feed. To make things easier let's create two object to represent the feed generator and our feed.
+
+<details>
+  <summary>"Feed generator? What is that?" (click this text to know more)</summary>
+
+<p>
+  The way it works is that a feed generator provide access to one or more feeds. This feed generator
+  is convenient because bluesky now can just hit your feed generator endpoint and target the
+  specific feed in one go:
+</p>
+`/xrpc/app.bsky.feed.getFeedSkeleton?feed=web-dev`
+
+Since we only have one feed we don't bother to handle the feed param in the code.
+
+</details>
 
 - Create a src/constants.ts file and add the following content:
 
@@ -481,8 +499,6 @@ export const FEED_GENERATOR = {
 } as const
 
 export const WEB_DEV_FEED = {
-  id: 'web-dev',
-  did: 'did:web:' + (process.env.HOSTNAME as string),
   name: 'My feed name displayed to users',
   description: 'This is my feed description that is visible in Bluesky',
   rkey: 'web-dev',
@@ -491,7 +507,7 @@ export const WEB_DEV_FEED = {
 
 The only value you can't change here is the dids (unless you know what you are doing)
 
-- add a dumby `HOSTNAME` to your .env for now:
+- add a dummy `HOSTNAME` to your .env for now:
 
 ```bash
 echo "HOSTNAME='https://my-hostname.com'" >> .env
@@ -543,7 +559,51 @@ Great, now our feed is alive, can be identified by Bluesky but is not accessible
 
 ## Deploy to a VPS
 
-This post is already long so I will shamelessly link to the tutorial of CJ setting up a VPS with coolify [here](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181)
+Disclaimer: we do not take care of the security in this post. Concerned about security? Setup Coolify with CJ [here](https://youtu.be/taJlPG82Ucw?si=RSi1Rfw8DDKkwhWd&t=181), he seems to know what he is doing not like me :)
+
+{/* This post is already long so I will shamelessly link to the tutorial of CJ setting up a VPS with coolify [here](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181) */}
+
+FYI: The default endpoint for jetstream is located "us-east" ([see repo](https://github.com/skyware-js/jetstream/blob/c01586a0ad95bad8c4c1ed131c179816fef8397a/src/index.ts#L100)), make sure to get your server nearby to reduce response times.
+
+To make the feed work, we need to access it through https. To do so, we need a domain name.
+
+### Domain name
+
+- buy a domain name at [namecheap](https://www.namecheap.com/)
+
+I bought webdevfeed.online for 1,11€/year
+
+### Hosting provider
+
+- Create an account on [ovh](https://www.ovh.com/auth)
+- Order a [VPS here](https://www.ovhcloud.com/en/vps/)
+
+Make sure the localisation is right on the top right of the page, creating an account on the us website and ordering on the british one won't work
+
+You should get into a form with asking:
+
+- "Configure your Virtual Private Server Instance" <br/>
+  => If you are low on money, give a shot to the VLE-2, I managed to run my feed for weeks with it even though it is below the specs recommendations of Coolify
+
+  For the others, grab the VLE-4
+
+- "Choose your images" <br/>
+
+I chose Ubuntu
+
+- "Keep or modify your datacenter localization and quantity" <br/>
+
+I picked North America since the jetstream servers are there
+
+- Now time to pay 🤑
+
+After paying, you should get your credentials for your server, let's connect through ssh and install Coolify!
+
+### Setup Coolify
+
+TODO: - go through CJ video - then continue my blog post based on end of section of CJ (give timestamps) - publish/scripts section - instead of adding env varaible one after the other lets just add them all when .env is created and update them when needed
+
+{/* ================================= */}
 
 <details>
   <summary>If you do use coolify, click this text </summary>- Choose the server: localhost
@@ -623,7 +683,92 @@ After installing coolify, the dashboard should be accessble at: http://your.vps.
 
 serverless and websocket how does it work?
 
-## publish
+## Publish the feed
+
+- Install the dependencies
+
+```bash
+npm install @atproto/api
+```
+
+- creat a `scripts/publishFeedGen.ts` file with the following content:
+
+```ts
+import { AtpAgent, BlobRef } from '@atproto/api'
+import fs from 'fs/promises'
+import { FEED_GENERATOR, WEB_DEV_FEED } from '../src/constants.js'
+
+const run = async () => {
+  const handle = 'johndoe.bsky.social'
+  const avatar = undefined as string | undefined
+
+  const agent = new AtpAgent({
+    service: 'https://bsky.social',
+  })
+
+  await agent.login({ identifier: handle, password: process.env.APP_PASSWORD as string })
+
+  let avatarRef: BlobRef | undefined
+  if (avatar) {
+    let encoding: string
+    if (avatar.endsWith('png')) {
+      encoding = 'image/png'
+    } else if (avatar.endsWith('jpg') || avatar.endsWith('jpeg')) {
+      encoding = 'image/jpeg'
+    } else {
+      throw new Error('expected png or jpeg')
+    }
+    const img = await fs.readFile(avatar)
+    const blobRes = await agent.api.com.atproto.repo.uploadBlob(img, {
+      encoding,
+    })
+    avatarRef = blobRes.data.blob
+  }
+
+  const data = {
+    repo: agent.session?.did ?? handle,
+    collection: 'app.bsky.feed.generator',
+    rkey: WEB_DEV_FEED.rkey,
+    record: {
+      did: FEED_GENERATOR.did,
+      displayName: WEB_DEV_FEED.name,
+      description: WEB_DEV_FEED.description,
+      avatar: avatarRef,
+      createdAt: new Date().toISOString(),
+    },
+  }
+
+  await agent.api.com.atproto.repo.putRecord(data)
+
+  console.log('All done 🎉')
+}
+
+run()
+```
+
+- Provide your handle as a value for the handle variable line 6
+
+- Optionnally, provide a local path to an image to the avatar variable line 7
+
+- Publish your feed with:
+
+```bash
+npx tsx ./scripts/publishFeedGen.ts
+```
+
+You should see 'All done 🎉' in your terminal when this is done.
+
+## Verify everything is working
+
+- Go on Blueksy > [Feeds](https://bsky.app/feeds)
+
+- In the "Discover New Feeds" search input, type the value of the `WEB_DEV_FEED.name` variable from your `src/constants.ts`
+
+Your feed should show up in the results. Click on it, posts from your feed should show up.
+
+## Troubleshooting
+
+- could not resolve identity: did:web:your-website.com
 
 NOTES:
 
