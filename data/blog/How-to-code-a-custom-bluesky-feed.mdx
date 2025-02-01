@@ -510,6 +510,7 @@ Since we only have one feed we don't bother to handle the feed param in the code
 ```ts
 export const FEED_GENERATOR = {
   did: 'did:web:' + (process.env.HOSTNAME as string),
+  endpoint: `https://${process.env.HOSTNAME as string}`,
 } as const
 
 export const WEB_DEV_FEED = {
@@ -524,10 +525,10 @@ The only value you can't change here is the dids (unless you know what you are d
 - add a dummy `HOSTNAME` to your .env for now:
 
 ```bash
-echo "HOSTNAME='https://my-hostname.com'" >> .env
+echo "HOSTNAME='my-hostname.com'" >> .env
 ```
 
-### create API routes
+### Create routes to get identified by Bluesky
 
 - add the following to your `server.ts` file:
 
@@ -546,7 +547,7 @@ app.get('/.well-known/did.json', (req, res) => {
     service: [
       {
         id: '#bsky_fg',
-        serviceEndpoint: process.env.API_URL as string,
+        serviceEndpoint: FEED_GENERATOR.endpoint
         type: 'BskyFeedGenerator',
       },
     ],
@@ -559,7 +560,7 @@ app.get('/xrpc/app.bsky.feed.describeFeedGenerator', (req, res) => {
     feeds: [
       {
         uri: `at://${process.env.PUBLISHER_DID as string}/app.bsky.feed.generator/${
-          WEB_DEV_FEED.recordKey
+          WEB_DEV_FEED.rkey
         }`,
       },
     ],
@@ -717,46 +718,53 @@ https://github.com/BenjaminLesne/custom-feed-template.git
 https://example.com
 ```
 
+- add this as a "Post-deployment" command:
+
+```bash
+npx drizzle-kit push
+```
+
+Don't forget to save!
+
+- Go to environment variables and add the following:
+
+```env
+DATABASE_URL="file:src/database/local.db"
+PUBLISHER_DID="did:plc:your_did"
+HOSTNAME="your_domaine.com"
+```
+
 - Sync your VPS ip address with your domain name
 
 1. Connect to [your namecheap account](https://www.namecheap.com/myaccount/login/?ReturnUrl=%2f)
 2. Go to your [domain list](https://ap.www.namecheap.com/domains/list/)
 3. Click "manage" next to your domain name
+4. Click Advanced DNS
+5. Add two new host records:
 
-[see namecheap documentation](https://www.namecheap.com/support/knowledgebase/article.aspx/319/2237/how-can-i-set-up-an-a-address-record-for-my-domain/) for more info
+   5-1. **type**: A Record, **host**:\*, **value**: YOUR_VPS_IP_ADDRESS, **TTL**: automatic
 
--write section saying to update the current domain of our app in Coolify to the domaine name we bought with HTTPS at the begining.
+   5-2. **type**: A Record, **host**:@, **value**: YOUR_VPS_IP_ADDRESS, **TTL**: automatic
 
-- sync the VPS ip address with the domain name in the domain provider dashboard
+[see namecheap documentation](https://www.namecheap.com/support/knowledgebase/article.aspx/319/2237/how-can-i-set-up-an-a-address-record-for-my-domain/) for more info.
+If you can't update Hosts records from the advanced tab, you might have a [suspended account](https://www.namecheap.com/support/knowledgebase/article.aspx/10698/46/what-to-do-if-my-domain-was-suspended-due-to-icanns-whois-verification-process/)
 
 - click deploy at the top right
 
-TODO: - go through CJ video - then continue my blog post based on end of section of CJ (give timestamps) - publish/scripts section - instead of adding env varaible one after the other lets just add them all when .env is created and update them when needed
-
-seetup the domain name with the VPS purchased
-
-{/* ================================= */}
-
-<details>
-  <summary>If you do use coolify, click this text </summary>- Choose the server: localhost
-</details>
-
-When setting up the VPS, make sure:
-
-- your feed is accessible through https (a domain name is required :/)
--
+Let's publish our feed while the deployment is running!
 
 ## Publish the feed
 
-- Install the dependencies
+- On your local repository, install the following dependencies
 
 ```bash
 npm install @atproto/api
 ```
 
-- creat a `scripts/publishFeedGen.ts` file with the following content:
+- create a `scripts/publishFeedGen.ts` file with the following content:
 
 ```ts
+import 'dotenv/config'
 import { AtpAgent, BlobRef } from '@atproto/api'
 import fs from 'fs/promises'
 import { FEED_GENERATOR, WEB_DEV_FEED } from '../src/constants.js'
@@ -813,6 +821,24 @@ run()
 
 - Optionnally, provide a local path to an image to the avatar variable line 7
 
+- Create a [new App password](https://bsky.app/settings/app-passwords)
+
+- add the password to your .env
+
+```bash
+echo "APP_PASSWORD=YOUR_APP_PASSWORD" >> .env
+```
+
+- update your HOSTNAME env variable with your domain name
+
+```bash
+HOSTANME='example.com'
+```
+
+- Update your feed name to own
+
+In constants.ts, update the name key from the WEB_DEV_FEED variable
+
 - Publish your feed with:
 
 ```bash
@@ -832,6 +858,24 @@ Your feed should show up in the results. Click on it, posts from your feed shoul
 ## Troubleshooting
 
 - could not resolve identity: did:web:your-website.com
+
+([source code](https://github.com/bluesky-social/atproto/blob/53fcc2fbcbda9b325eeffb5705126831baf2a427/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L34) throwing this error)
+
+Did you add a HOSTNAME in your env variables without "https://" ?
+
+- Invalid app.bsky.feed.generator record: Record/did must be a valid did
+
+  Make sure there is no "http(s)://" in the did
+
+- invalid feed generator service details in did document: did:web:api.webdevfeed.online
+
+([source code](https://github.com/bluesky-social/atproto/blob/1c195a384549ed371cdf7ce51495da37388f9c62/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47) throwing this error)
+
+Make sure your hostname is right (without "https://") and make sure you did not publish the wrong hostname to bluesky!
+
+- How to debug?
+
+  The doc doesn't help much so what you have to do is paste the error message in github between "quotes", find the file from the atproto repo throwing that error message then try to understand the code... good luck!
 
 NOTES:
 
@@ -860,6 +904,7 @@ Message from server: invalid feed generator service details in did document: did
 => source code: https://github.com/bluesky-social/atproto/blob/3303ff16a482a8dc6d31edc970398794184032d4/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47
 => it is "bsky_fg" not "#bsky_fg" WRONG you need the #
 => Bluesky may take a bit of time to access the updates of your feed (like the id update)
+=> https://github.com/bluesky-social/atproto/blob/1c195a384549ed371cdf7ce51495da37388f9c62/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47
 
 How to debug?
 Use public endpoint from hoppscotch
