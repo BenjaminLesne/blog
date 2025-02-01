@@ -379,6 +379,20 @@ If not already done, start your server:
 npx tsx watch ./src/server.ts
 ```
 
+And add in your package.json the following scripts:
+
+```json
+{
+  // ...
+  "scripts": {
+    "dev": "tsx watch ./src/server.ts",
+    "start": "tsx ./src/server.ts",
+    "test": ""
+  }
+  // ...
+}
+```
+
 Currently our database is getting filled with posts.
 Now we would like to return our posts when requested, let's make our api!
 
@@ -555,7 +569,28 @@ app.get('/xrpc/app.bsky.feed.describeFeedGenerator', (req, res) => {
 // ...
 ```
 
-Great, now our feed is alive, can be identified by Bluesky but is not accessible on the web. Time to deploy our app to a VPS!
+- In your root, create a github public repository for your feed
+
+Using the [github cli](https://cli.github.com/):
+
+```bash
+gh repo create
+```
+
+```bash
+? What would you like to do? Push an existing local repository to GitHub Path to local repository .
+? Repository name your_feed_name
+? Repository owner your_github_account
+? Description /
+? Visibility Public
+? Add a remote? Yes
+? What should the new remote be called? origin
+? Would you like to push commits from the current branch to "origin"? Yes
+```
+
+You can also create it through the [github interface here](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository)
+
+Great, now our feed has a public repository and can be identified by Bluesky but it is not accessible on the web. Time to deploy our app to a VPS!
 
 ## Deploy to a VPS
 
@@ -578,14 +613,12 @@ I bought webdevfeed.online for 1,11€/year
 - Create an account on [ovh](https://www.ovh.com/auth)
 - Order a [VPS here](https://www.ovhcloud.com/en/vps/)
 
-Make sure the localisation is right on the top right of the page, creating an account on the us website and ordering on the british one won't work
+Make sure the localisation is right on the top right of the page, creating an account on the US website and ordering on the british one won't work
 
-You should get into a form with asking:
+You should get into a form asking:
 
 - "Configure your Virtual Private Server Instance" <br/>
-  => If you are low on money, give a shot to the VLE-2, I managed to run my feed for weeks with it even though it is below the specs recommendations of Coolify
-
-  For the others, grab the VLE-4
+  => Grab the VLE-2 (the lowest spec)
 
 - "Choose your images" <br/>
 
@@ -597,11 +630,110 @@ I picked North America since the jetstream servers are there
 
 - Now time to pay 🤑
 
-After paying, you should get your credentials for your server, let's connect through ssh and install Coolify!
+After paying, you should get an email within 20 minutes with your credentials to connect to your server, let's connect through ssh and install Coolify!
 
 ### Setup Coolify
 
+- ssh to your server
+
+```bash
+ssh YOUR_USERNAME@YOUR_VPS_IP_ADDRESS
+```
+
+You will find the username, ip address and password in the OVH email sent after the VPS has been installed.
+
+- Install coolify by running on your VPS:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+```
+
+<details>
+  <summary>To fix "Please run this script as root or with sudo" click this text</summary>
+
+You probably don't have a root password yet, let's set one:
+
+```bash
+sudo passwd root
+```
+
+- Become root:
+
+```bash
+su - root
+```
+
+- Now try again to install Coolify
+
+</details>
+
+<details>
+  <summary>To fix "Please install Docker manually" click this text</summary>
+
+Follow the [installation steps from here](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) and try again to install Coolify
+
+</details>
+
+After installing coolify, the dashboard should be accessble at: http://your.vps.ip.address:8000
+
+- Go to http://your.vps.ip.address:8000 and create your coolify account
+
+- Go through the onboarding
+
+- Choose localhost for the server
+
+- Create your first project
+
+You should end up in your Coolify dashboard at projects > New ressource
+
+- In our case, we select public repository
+
+- Paste the https url to your repository
+
+Example:
+
+```url
+https://github.com/BenjaminLesne/custom-feed-template.git
+```
+
+<details>
+  <summary>Where to find this url?</summary>
+
+1. go to your [github](https://github.com) repositories
+2. go to your repository
+3. click on the green button "code"
+4. click on HTTPS
+5. copy the url
+
+</details>
+
+- click check repository
+
+- click continue
+
+- Update the "Domains" field with the domain name you bought (use https!)
+
+```url
+https://example.com
+```
+
+- Sync your VPS ip address with your domain name
+
+1. Connect to [your namecheap account](https://www.namecheap.com/myaccount/login/?ReturnUrl=%2f)
+2. Go to your [domain list](https://ap.www.namecheap.com/domains/list/)
+3. Click "manage" next to your domain name
+
+[see namecheap documentation](https://www.namecheap.com/support/knowledgebase/article.aspx/319/2237/how-can-i-set-up-an-a-address-record-for-my-domain/) for more info
+
+-write section saying to update the current domain of our app in Coolify to the domaine name we bought with HTTPS at the begining.
+
+- sync the VPS ip address with the domain name in the domain provider dashboard
+
+- click deploy at the top right
+
 TODO: - go through CJ video - then continue my blog post based on end of section of CJ (give timestamps) - publish/scripts section - instead of adding env varaible one after the other lets just add them all when .env is created and update them when needed
+
+seetup the domain name with the VPS purchased
 
 {/* ================================= */}
 
@@ -613,75 +745,6 @@ When setting up the VPS, make sure:
 
 - your feed is accessible through https (a domain name is required :/)
 -
-
-{/* provide info to how to run with coolify the app? tsx blabla */}
-
-{/* ======================================================================================== */}
-
-{/* ===================== */}
-I will shamelessly link to the tutorial of CJ setting up coolify [here](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181)
-
-This post is already long, also you might be interested to use something else than coolify.
-
-<details>
-  <summary>If you do use coolify, click this text </summary>- When setting it up, choose the server:
-  localhost not remote
-</details>
-
-To go deeper and especially take care of the security, I highlighy recommend [the video from CJ](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181)
-
-However, I'm going to provide the minium and not so secure steps to run an app with coolify
-
-{/* ===================== */}
-
-I chose OVH as a hosting provider with [the Starter plan](https://www.ovhcloud.com/en-ie/vps)
-
-After paying I get by email: the ip address, password and user to connect with to the server.
-
-- Let's use ssh to access the VPS:
-
-```bash
-ssh myUser@127.0.0.1
-```
-
-It should ask for the password provided by email.
-
-Now, to make our life easier when deploying we are going to use Coolify.
-
-To go deeper and especially take care of the security, I highlighy recommend [the video from CJ](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181)
-
-However, I'm going to provide the minium and not so secure steps to run an app with coolify
-
-- Install coolify by running on your VPS:
-
-```bash
-curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
-```
-
-<details>
-  <summary>To fix "Please run this script as root or with sudo" click this text</summary>
-- Try again as root, to become root:  
-```bash
-su - root
-```
-
-- If you don't have the root password, you should be able to set one with:
-
-```bash
-sudo passwd root
-```
-
-</details>
-
-After installing coolify, the dashboard should be accessble at: http://your.vps.ip.address:8000
-
-- Go to http://your.vps.ip.address:8000 and create your coolify account
-
-- Choose localhost for the server
-
-- Create your first project
-
-serverless and websocket how does it work?
 
 ## Publish the feed
 
