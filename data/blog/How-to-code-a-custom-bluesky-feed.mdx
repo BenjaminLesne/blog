@@ -853,7 +853,7 @@ You should see 'All done 🎉' in your terminal when this is done.
 
 - In the "Discover New Feeds" search input, type the value of the `WEB_DEV_FEED.name` variable from your `src/constants.ts`
 
-Your feed should show up in the results. Click on it, posts from your feed should show up.
+Your feed should show up in the results. Click on it, posts from your feed should show up. It might take few minutes before a post gets added to your database. Congrats you have your own feed now!
 
 ## Troubleshooting
 
@@ -876,39 +876,3 @@ Make sure your hostname is right (without "https://") and make sure you did not 
 - How to debug?
 
   The doc doesn't help much so what you have to do is paste the error message in github between "quotes", find the file from the atproto repo throwing that error message then try to understand the code... good luck!
-
-NOTES:
-
-coolify:
-sudo passwd root?
-then use root user to run the coolify bash command
-don't add your volumes in /app, it is not accessible
-setup project domain (web dev feed > https://api.webdevfeed.online)
-firefox prevent https access cause: self signed ssl certificate
-=> means domains name in project setting is https
-
-When publishing, error:
-Invalid app.bsky.feed.generator record: Record/did must be a valid did
-=> remove the http(s):// from the did
-
-could not resolve identity: did:web:boc48gookcswcoo884o0owck.167.114.2.165.sslip.io
-=> the did in /xrpc/app.bsky.feed.describeFeedGenerator or the id in /.well-known/did.json
-=> code throwing the error: https://github.com/bluesky-social/atproto/blob/53fcc2fbcbda9b325eeffb5705126831baf2a427/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L34
-=> your website need to be accessible on httpS:// (ssl needed)
-=> project may have not been redeployed when adding this https domain which didn't trigger a certificate generation?
-=> use https url in domain in project > domain
-=> restart the proxy servers > proxy > restart (may need 2 hours to make it work) + redeploy your app
-
-Message from server: invalid feed generator service details in did document: did:web:api.webdevfeed.online
-=> in /.well-known/did.json, the service return does not have the id "#bsky_fg"
-=> source code: https://github.com/bluesky-social/atproto/blob/3303ff16a482a8dc6d31edc970398794184032d4/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47
-=> it is "bsky_fg" not "#bsky_fg" WRONG you need the #
-=> Bluesky may take a bit of time to access the updates of your feed (like the id update)
-=> https://github.com/bluesky-social/atproto/blob/1c195a384549ed371cdf7ce51495da37388f9c62/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47
-
-How to debug?
-Use public endpoint from hoppscotch
-
-You need a domain name
-add the ip address of your server to your domain provider
-add the domain name to coolify
