@@ -1,4 +1,5 @@
 import 'css/prism.css'
+import 'css/custom.css'
 import 'katex/dist/katex.css'
 
 import PageTitle from '@/components/PageTitle'
