@@ -1,0 +1,190 @@
+---
+title: Understanding The Useless useCallback
+date: '2025-10-09'
+tags: ['react', 'javascript']
+draft: false
+summary: I explain with my own words `The Useless useCallback` article from TkDodo!
+---
+
+# Understanding The Useless useCallback
+
+Here is my understanding of [The Useless useCallback](https://tkdodo.eu/blog/the-useless-usecallback) article from TkDodo! I didn't find it that easy to understand so hopefully I can make it click by writing this blog post and maybe help others too :)
+
+## The situation
+
+Here is a problematic hook:
+
+```tsx
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const onKeyDown = useCallback(() => costyFn(hotkeys), [hotkeys])
+
+  // ...
+}
+```
+
+You would probably use it like that:
+
+```tsx
+import { useHotkeys } from '@/hooks/useHotkeys'
+
+export function MyComponent() {
+  const [isEditing, setIsEditing] = useState(false)
+  const hotkeys = isEditing ? ['Escape'] : ['Control', 'n']
+
+  useHotkeys(hotkeys)
+
+  // ...
+}
+```
+
+## The problem
+
+1. `hotkeys` gets recreated on every render changing its reference.
+2. We use `hotkeys` as a useCallback dependency which prevents any caching.
+3. `onKeyDown` changes every render → no real memoization.
+
+### The solution explained
+
+Since hotkeys is not stable, let's remove it from the dependency array.
+
+```tsx {2}
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const onKeyDown = useCallback(() => costyFn(hotkeys), [])
+
+  // ...
+}
+```
+
+Now the function is stable, but `onKeyDown` keeps using the `hotkeys` from the first render, even when `hotkeys` changes.
+
+Why ?
+
+Because useCallback caches the function along with all the references of each variable. Meaning that the `hotkeys` reference cached is the one from the first render. That’s fine as long as we can update the value that the reference points to. That’s where useRef comes in.
+
+```tsx
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const hotkeysRef = useRef(hotkeys)
+
+  useEffect(() => {
+    hotkeysRef.current = hotkeys
+  })
+
+  const onKeyDown = useCallback(() => costyFn(hotkeysRef.current), [])
+
+  // ...
+}
+```
+
+This is the solution... still confused?
+
+Let's see how references behave on re-renders without a ref:
+
+1. First render:
+
+```tsx
+/*
+    hotkeys:
+    - reference = A1
+    - value = ['Control', 'n']
+*/
+export function useHotkeys(hotkeys: Hotkey[]): {
+    const onKeyDown = useCallback(() => costyFn(hotkeys), [])
+/*
+    useCallback add hotkeys to cache with:
+    - reference = A1
+    - value = ['Control', 'n']
+*/
+}
+```
+
+2. Second render, `hotkeys` changed:
+
+```tsx
+/*
+    hotkeys:
+    - reference = A2 // new
+    - value = ['Escape'] // new
+*/
+export function useHotkeys(hotkeys: Hotkey[]): {
+    const onKeyDown = useCallback(() => costyFn(hotkeys), [])
+/*
+    hotkeys from useCallback:
+    - reference = A1 // old, gotten from cache
+    - value = ['Control', 'n'] // old
+*/
+}
+```
+
+Our useCallback still use the reference that leads to the old value, unfortunately, we can't modify the value of this reference.
+
+Now with a ref:
+
+1. First render:
+
+```tsx
+/*
+    hotkeys:
+    - reference = A1
+    - value = ['Control', 'n']
+*/
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const hotkeysRef = useRef(hotkeys)
+/*
+    hotkeysRef:
+    - reference = B1
+    - value = { current: ['Control', 'n'] }
+*/
+
+  useEffect(() => {
+      hotkeysRef.current = hotkeys
+  })
+
+  const onKeyDown = useCallback(() => costyFn(hotkeysRef.current), [])
+/*
+    useCallback add hotkeysRef to cache with:
+    - reference = B1
+    - value = { current: ['Control', 'n'] } // value after useEffect run
+*/
+}
+```
+
+2. Second render, `hotkeys` changed:
+
+```tsx {1-5, 14-18}
+/*
+    hotkeys:
+    - reference = A2 // new
+    - value = ['Escape'] // new
+*/
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const hotkeysRef = useRef(hotkeys)
+
+  useEffect(() => {
+      hotkeysRef.current = hotkeys
+  })
+
+  const onKeyDown = useCallback(() => costyFn(hotkeysRef.current), [])
+/*
+    hotkeysRef from useCallback:
+    - reference = B1 // old, gotten from cache
+    - value = { current: ['Escape'] } // new value thanks to useEffect (this is not cached)
+*/
+}
+```
+
+Our useCallback still use the same `hotkeysRef` reference but the value has been updated in our useEffect. Now our `onKeyDown` function use the right `hotkeysRef` value!
+
+### Conclusion
+
+Forget everthing I just said and use the new hook [useEffectEvent](https://react.dev/reference/react/useEffectEvent) made exactly for that :)
+
+```tsx
+export function useHotkeys(hotkeys: Hotkey[]): {
+  const onKeyDown = useEffectEvent(() => costyFn(hotkeys))
+
+// ...
+
+}
+```
+
+Bye 👋

@@ -1,0 +1,878 @@
+---
+title: How to code a custom bluesky feed?
+date: '2024-11-25'
+tags: ['javascript', 'open-source']
+draft: false
+summary: use your own algorithm for your feed
+---
+
+## Introduction
+
+I found the feed builders a bit limited so I wanted to build my own.
+I managed to find a [Feed Generator template](https://github.com/bluesky-social/feed-generator) but was completely lost in the code. This is why I decided to make my own from scratch!
+
+## TL;DR
+
+The [repo is here](https://github.com/BenjaminLesne/bluesky-feed-template), read the readme to launch your feed asap.
+
+We are building this:
+
+![custom feed architecture](/static/images/bluesky-feed-architecture.png)
+
+## Setup the repository
+
+- Create a directory then initialize npm and git:
+
+```bash
+mkdir my-custom-feed &&
+cd my-custom-feed &&
+npm init es6 -y &&
+git init
+```
+
+- In your root directory, create a `.gitignore` file with the following content:
+
+```bash
+# dependencies
+/node_modules
+
+# env
+.env
+.env*.local
+
+# database
+local.db*
+```
+
+- In your root, create a `tsconfig.json` file with this content:
+
+```json
+{
+  "compilerOptions": {
+    "lib": ["es2022"],
+    "module": "node16",
+    "target": "es2022",
+    "moduleResolution": "node16",
+    "removeComments": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noImplicitAny": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "checkJs": true
+  },
+  "include": [".eslintrc.cjs", "**/*.ts", "**/*.cjs", "**/*.js"],
+  "exclude": ["node_modules"]
+}
+```
+
+- Create the entry point of your app in the src directory and log out Hello world
+
+```bash
+mkdir src && echo 'console.log("hello world");' > src/server.ts
+```
+
+- Install typescript, tsx to run the server.ts file and nodes types
+
+```bash
+npm install --save-dev typescript tsx @types/node
+```
+
+- You should see "hello world" in the terminal when starting the server:
+
+```bash
+npx tsx watch ./src/server.ts
+```
+
+## Connect to the jetstream
+
+Now, we need data. Let's connect to bluesky's jetstreams to get the newly created posts, likes, and more.
+
+- To connect to a jetstream, install @skyware/jetstream and ws:
+
+```bash
+npm install @skyware/jetstream ws &&
+npm install --save-dev @types/ws
+```
+
+- create a jetstream.ts file with the following content in the src directory:
+
+```ts
+import { Jetstream } from '@skyware/jetstream'
+import WebSocket from 'ws'
+
+export const jetstream = new Jetstream({
+  wantedCollections: ['app.bsky.feed.post'],
+  ws: WebSocket,
+})
+
+jetstream.onCreate('app.bsky.feed.post', (event) => {
+  console.log(event.commit.record)
+})
+```
+
+- Now, start the jetstream in your `server.ts` (be ready to stop your server this is going to spam logs):
+
+```ts
+import { jetstream } from './jetstream.js'
+
+jetstream.start()
+```
+
+You should have crazy amount of logs poping in your terminal when running the server now.
+Good job, you succesffully connected to the jetstream 👍
+
+You can stop the server for now (CTRL + C).
+Now that we have the data, we need to store only the relevant posts in our database.
+
+## Setup the database
+
+We will use [Drizzle](https://orm.drizzle.team/docs/overview) and SQLite (see [drizzle doc for sqlite](https://orm.drizzle.team/docs/get-started/sqlite-new)) but you can use whatever database you'd like.
+
+- Install the dependencies
+
+```bash
+npm i drizzle-orm @libsql/client dotenv
+npm i -D drizzle-kit
+```
+
+- Create the src/database directory and an empty schemas.ts file inside it by running the following command in your root:
+
+```bash
+mkdir src/database && touch src/database/schemas.ts
+```
+
+- Add this to the schema.ts file:
+
+```ts
+import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const postsTable = sqliteTable('posts', {
+  id: int().primaryKey({ autoIncrement: true }),
+  uri: text().notNull().unique(),
+  interestScore: int().notNull(),
+  createdAt: int({ mode: 'timestamp' }),
+})
+```
+
+- create a .env file in your root directory and add this DATABASE_URL variable:
+
+```bash
+touch .env &&
+echo "DATABASE_URL=file:src/database/local.db" >> .env
+```
+
+- load the env variable with dotenv in your server.ts file by adding this import at the top of the file:
+
+```ts
+import 'dotenv/config'
+```
+
+- Create a `drizzle.config.ts` file in the root of your project and add the following content:
+
+```ts
+import { defineConfig } from 'drizzle-kit'
+
+export default defineConfig({
+  out: './drizzle',
+  schema: './src/database/schemas.ts',
+  dialect: 'sqlite',
+  dbCredentials: {
+    url: process.env.DATABASE_URL as string,
+  },
+})
+```
+
+- create a `database.ts` file in src/database directory and add the following content:
+
+```ts
+import { createClient } from '@libsql/client'
+import { drizzle } from 'drizzle-orm/libsql'
+
+const client = createClient({
+  url: process.env.DATABASE_URL as string,
+})
+
+await client.execute('PRAGMA journal_mode = WAL')
+
+export const db = drizzle(client)
+```
+
+<details>
+<summary>Why do we enable WAL? (click this text to see)</summary>
+
+By default, SQLite operates in a mode that locks the database during write operations, preventing simultaneous reads and writes. For example, if someone requests the feed while a new post is being written, the feed request would be blocked until the write operation finishes.
+
+Enabling WAL (Write-Ahead Logging) mode solves this by allowing concurrent reads and writes, ensuring smoother performance and better user experience.
+
+</details>
+
+- Now generate your local.db file by applying the post schema:
+
+```bash
+npx drizzle-kit push
+```
+
+Now we can add posts for our feed to the database. But first, we need an algorithm to decide if we should store or not the post.
+
+## Algorithm
+
+What we look for is posts talking about javascript and with embedded content (image, video, links, etc.). Also, we don't want NSFW labels (see [doc for more](https://docs.bsky.app/docs/advanced-guides/moderation#label-values)).
+
+- In your jetstream.ts file, add the following function:
+
+```ts
+import type { CommitCreate } from '@skyware/jetstream'
+// ...rest of the imports
+
+const BLOCK_LIST = ['check doc for NSFW labels', 'label2', 'label3']
+const ALLOWED_REGEX = /\bjavascript\b/i
+
+type StandardAlgoArgs = {
+  record: CommitCreate<'app.bsky.feed.post'>['record']
+}
+export function standardAlgo({ record }: StandardAlgoArgs) {
+  let score = 0
+  let denied = false
+
+  switch (record.$type) {
+    case 'app.bsky.feed.post': {
+      record.labels?.values.forEach((value) => {
+        if (BLOCK_LIST.includes(value.val)) {
+          denied = true
+        }
+      })
+
+      if (denied) {
+        return 0
+      }
+
+      const isAboutWebdev = ALLOWED_REGEX.test(record.text)
+      if (isAboutWebdev) {
+        score = score + 1
+
+        if (record.embed) {
+          score = score + 1
+        }
+      }
+
+      break
+    }
+
+    default:
+      break
+  }
+
+  return score
+}
+
+// ... rest of the code
+```
+
+- Now, use the standardAlgo function to decide if we store the received post to the database:
+
+```ts
+import { db } from './database/database.js'
+import { postsTable } from './database/schemas.js'
+// ... rest of the imports
+
+// ...
+
+jetstream.onCreate('app.bsky.feed.post', async (event) => {
+  const record = event.commit.record
+  const interestScore = standardAlgo({ record })
+
+  if (interestScore > 0) {
+    const did = event.did
+    const recordKey = event.commit.rkey
+
+    await db.insert(postsTable).values({
+      interestScore,
+      uri: `at://${did}/app.bsky.feed.post/${recordKey}`,
+    })
+  }
+})
+```
+
+<details>
+<summary>Your jetstream.ts file should look like this now (click to see):</summary>
+
+```ts
+import { db } from './database/database.js'
+import { postsTable } from './database/schemas.js'
+import type { CommitCreate } from '@skyware/jetstream'
+import { Jetstream } from '@skyware/jetstream'
+import WebSocket from 'ws'
+
+const BLOCK_LIST = ['check doc for NSFW labels', 'label2', 'label3']
+const ALLOWED_REGEX = /\bjavascript\b/i
+
+type StandardAlgoArgs = {
+  record: CommitCreate<'app.bsky.feed.post'>['record']
+}
+export function standardAlgo({ record }: StandardAlgoArgs) {
+  let score = 0
+  let denied = false
+
+  switch (record.$type) {
+    case 'app.bsky.feed.post': {
+      record.labels?.values.forEach((value) => {
+        if (BLOCK_LIST.includes(value.val)) {
+          denied = true
+        }
+      })
+
+      if (denied) {
+        return 0
+      }
+
+      const isAboutWebdev = ALLOWED_REGEX.test(record.text)
+      if (isAboutWebdev) {
+        score = score + 1
+
+        if (record.embed) {
+          score = score + 1
+        }
+      }
+
+      break
+    }
+
+    default:
+      break
+  }
+
+  return score
+}
+
+export const jetstream = new Jetstream({
+  wantedCollections: ['app.bsky.feed.post'],
+  ws: WebSocket,
+})
+
+jetstream.onCreate('app.bsky.feed.post', async (event) => {
+  const record = event.commit.record
+  const interestScore = standardAlgo({ record })
+
+  if (interestScore > 0) {
+    const did = event.did
+    const recordKey = event.commit.rkey
+
+    await db.insert(postsTable).values({
+      interestScore,
+      uri: `at://${did}/app.bsky.feed.post/${recordKey}`,
+    })
+
+    console.log('added post to db!')
+  }
+})
+```
+
+</details>
+
+If not already done, start your server:
+
+```bash
+npx tsx watch ./src/server.ts
+```
+
+And add in your package.json the following scripts:
+
+```json
+{
+  // ...
+  "scripts": {
+    "dev": "tsx watch ./src/server.ts",
+    "start": "tsx ./src/server.ts",
+    "test": ""
+  }
+  // ...
+}
+```
+
+Currently our database is getting filled with posts.
+Now we would like to return our posts when requested, let's make our api!
+
+## API
+
+### `/xrpc/app.bsky.feed.getFeedSkeleton`
+
+Bluesky is going to hit the endpoint `/xrpc/app.bsky.feed.getFeedSkeleton` to retrieve the feed's posts. Let's make the endpoint with express.
+
+- install express
+
+```bash
+npm install express &&
+npm install --save-dev @types/express
+```
+
+- In server.ts, create the endpoint and return the last 10 posts:
+
+```ts
+// ...rest of the imports
+import express from 'express'
+import { db } from './database/database.js'
+import { postsTable } from './database/schemas.js'
+import { desc } from 'drizzle-orm'
+
+// ...rest of the code
+
+const app = express()
+
+app.get('/xrpc/app.bsky.feed.getFeedSkeleton', async (req, res) => {
+  const feed = await db
+    .select({
+      post: postsTable.uri,
+    })
+    .from(postsTable)
+    .orderBy(desc(postsTable.interestScore))
+    .limit(10)
+
+  res.json({
+    feed,
+  })
+})
+
+app.listen(3000, () => {
+  console.log(`Feed app listening on port 3000`)
+})
+```
+
+When running tsx server.ts, you should be able to get your posts at http://localhost:3000/xrpc/app.bsky.feed.getFeedSkeleton
+
+Bluesky also need to make sure the feed requested is ours. To do so, bluesky hit two endpoints, let's make them! But first we need your handle and did.
+
+### Get your handle
+
+- Browse to https://bsky.app
+
+- Click on `profile` in the left navigation
+
+- Grab the handle
+
+On the page, below your username, your handle should be displayed, it looks like this:
+
+```text
+@johndoe.bsky.social
+```
+
+or in the url of the page:
+
+```url
+https://bsky.app/profile/johndoe.bsky.social
+```
+
+Copy the "johndoe" part of it.
+
+Also keep the handle near by, we will use it to later to publish the feed
+
+### Get your did
+
+- Paste the "johndoe" of your handle on [this website](https://bsky-did.neocities.org/)
+
+- click `get my did`
+
+It should display on the screen your did, it looks like this:
+
+```url
+did:plc:biu6j0lqrtpjfazvekg6zrah
+```
+
+- add the did to your .env
+
+```bash
+echo "PUBLISHER_DID='YOUR_DID'" >> .env
+```
+
+### Setup the required variables
+
+We will have to provide info about the feed. To make things easier let's create two object to represent the feed generator and our feed.
+
+<details>
+  <summary>"Feed generator? What is that?" (click this text to know more)</summary>
+
+<p>
+  The way it works is that a feed generator provide access to one or more feeds. This feed generator
+  is convenient because bluesky now can just hit your feed generator endpoint and target the
+  specific feed in one go:
+</p>
+`/xrpc/app.bsky.feed.getFeedSkeleton?feed=web-dev`
+
+Since we only have one feed we don't bother to handle the feed param in the code.
+
+</details>
+
+- Create a src/constants.ts file and add the following content:
+
+```ts
+export const FEED_GENERATOR = {
+  did: 'did:web:' + (process.env.HOSTNAME as string),
+  endpoint: `https://${process.env.HOSTNAME as string}`,
+} as const
+
+export const WEB_DEV_FEED = {
+  name: 'My feed name displayed to users',
+  description: 'This is my feed description that is visible in Bluesky',
+  rkey: 'web-dev',
+} as const
+```
+
+The only value you can't change here is the dids (unless you know what you are doing)
+
+- add a dummy `HOSTNAME` to your .env for now:
+
+```bash
+echo "HOSTNAME='my-hostname.com'" >> .env
+```
+
+### Create routes to get identified by Bluesky
+
+- add the following to your `server.ts` file:
+
+This allow bluesky to understand that we have a feed generator and that this feed generator provide one feed
+
+```ts
+// ...rest of the imports
+import { WEB_DEV_FEED, FEED_GENERATOR } from './contants.js'
+
+// ...
+
+app.get('/.well-known/did.json', (req, res) => {
+  res.json({
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: FEED_GENERATOR.did,
+    service: [
+      {
+        id: '#bsky_fg',
+        serviceEndpoint: FEED_GENERATOR.endpoint
+        type: 'BskyFeedGenerator',
+      },
+    ],
+  })
+})
+
+app.get('/xrpc/app.bsky.feed.describeFeedGenerator', (req, res) => {
+  res.json({
+    did: FEED_GENERATOR.did,
+    feeds: [
+      {
+        uri: `at://${process.env.PUBLISHER_DID as string}/app.bsky.feed.generator/${
+          WEB_DEV_FEED.rkey
+        }`,
+      },
+    ],
+  })
+})
+
+// ...
+```
+
+- In your root, create a github public repository for your feed
+
+Using the [github cli](https://cli.github.com/):
+
+```bash
+gh repo create
+```
+
+```bash
+? What would you like to do? Push an existing local repository to GitHub Path to local repository .
+? Repository name your_feed_name
+? Repository owner your_github_account
+? Description /
+? Visibility Public
+? Add a remote? Yes
+? What should the new remote be called? origin
+? Would you like to push commits from the current branch to "origin"? Yes
+```
+
+You can also create it through the [github interface here](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository)
+
+Great, now our feed has a public repository and can be identified by Bluesky but it is not accessible on the web. Time to deploy our app to a VPS!
+
+## Deploy to a VPS
+
+Disclaimer: we do not take care of the security in this post. Concerned about security? Setup Coolify with CJ [here](https://youtu.be/taJlPG82Ucw?si=RSi1Rfw8DDKkwhWd&t=181), he seems to know what he is doing not like me :)
+
+{/* This post is already long so I will shamelessly link to the tutorial of CJ setting up a VPS with coolify [here](https://youtu.be/taJlPG82Ucw?si=6X-tUxQ8_5BlCINx&t=181) */}
+
+FYI: The default endpoint for jetstream is located "us-east" ([see repo](https://github.com/skyware-js/jetstream/blob/c01586a0ad95bad8c4c1ed131c179816fef8397a/src/index.ts#L100)), make sure to get your server nearby to reduce response times.
+
+To make the feed work, we need to access it through https. To do so, we need a domain name.
+
+### Domain name
+
+- buy a domain name at [namecheap](https://www.namecheap.com/)
+
+I bought webdevfeed.online for 1,11€/year
+
+### Hosting provider
+
+- Create an account on [ovh](https://www.ovh.com/auth)
+- Order a [VPS here](https://www.ovhcloud.com/en/vps/)
+
+Make sure the localisation is right on the top right of the page, creating an account on the US website and ordering on the british one won't work
+
+You should get into a form asking:
+
+- "Configure your Virtual Private Server Instance" <br/>
+  => Grab the VLE-2 (the lowest spec)
+
+- "Choose your images" <br/>
+
+I chose Ubuntu
+
+- "Keep or modify your datacenter localization and quantity" <br/>
+
+I picked North America since the jetstream servers are there
+
+- Now time to pay 🤑
+
+After paying, you should get an email within 20 minutes with your credentials to connect to your server, let's connect through ssh and install Coolify!
+
+### Setup Coolify
+
+- ssh to your server
+
+```bash
+ssh YOUR_USERNAME@YOUR_VPS_IP_ADDRESS
+```
+
+You will find the username, ip address and password in the OVH email sent after the VPS has been installed.
+
+- Install coolify by running on your VPS:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+```
+
+<details>
+  <summary>To fix "Please run this script as root or with sudo" click this text</summary>
+
+You probably don't have a root password yet, let's set one:
+
+```bash
+sudo passwd root
+```
+
+- Become root:
+
+```bash
+su - root
+```
+
+- Now try again to install Coolify
+
+</details>
+
+<details>
+  <summary>To fix "Please install Docker manually" click this text</summary>
+
+Follow the [installation steps from here](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository) and try again to install Coolify
+
+</details>
+
+After installing coolify, the dashboard should be accessble at: http://your.vps.ip.address:8000
+
+- Go to http://your.vps.ip.address:8000 and create your coolify account
+
+- Go through the onboarding
+
+- Choose localhost for the server
+
+- Create your first project
+
+You should end up in your Coolify dashboard at projects > New ressource
+
+- In our case, we select public repository
+
+- Paste the https url to your repository
+
+Example:
+
+```url
+https://github.com/BenjaminLesne/custom-feed-template.git
+```
+
+<details>
+  <summary>Where to find this url?</summary>
+
+1. go to your [github](https://github.com) repositories
+2. go to your repository
+3. click on the green button "code"
+4. click on HTTPS
+5. copy the url
+
+</details>
+
+- click check repository
+
+- click continue
+
+- Update the "Domains" field with the domain name you bought (use https!)
+
+```url
+https://example.com
+```
+
+- add this as a "Post-deployment" command:
+
+```bash
+npx drizzle-kit push
+```
+
+Don't forget to save!
+
+- Go to environment variables and add the following:
+
+```env
+DATABASE_URL="file:src/database/local.db"
+PUBLISHER_DID="did:plc:your_did"
+HOSTNAME="your_domaine.com"
+```
+
+- Sync your VPS ip address with your domain name
+
+1. Connect to [your namecheap account](https://www.namecheap.com/myaccount/login/?ReturnUrl=%2f)
+2. Go to your [domain list](https://ap.www.namecheap.com/domains/list/)
+3. Click "manage" next to your domain name
+4. Click Advanced DNS
+5. Add two new host records:
+
+   5-1. **type**: A Record, **host**:\*, **value**: YOUR_VPS_IP_ADDRESS, **TTL**: automatic
+
+   5-2. **type**: A Record, **host**:@, **value**: YOUR_VPS_IP_ADDRESS, **TTL**: automatic
+
+[see namecheap documentation](https://www.namecheap.com/support/knowledgebase/article.aspx/319/2237/how-can-i-set-up-an-a-address-record-for-my-domain/) for more info.
+If you can't update Hosts records from the advanced tab, you might have a [suspended account](https://www.namecheap.com/support/knowledgebase/article.aspx/10698/46/what-to-do-if-my-domain-was-suspended-due-to-icanns-whois-verification-process/)
+
+- click deploy at the top right
+
+Let's publish our feed while the deployment is running!
+
+## Publish the feed
+
+- On your local repository, install the following dependencies
+
+```bash
+npm install @atproto/api
+```
+
+- create a `scripts/publishFeedGen.ts` file with the following content:
+
+```ts
+import 'dotenv/config'
+import { AtpAgent, BlobRef } from '@atproto/api'
+import fs from 'fs/promises'
+import { FEED_GENERATOR, WEB_DEV_FEED } from '../src/constants.js'
+
+const run = async () => {
+  const handle = 'johndoe.bsky.social'
+  const avatar = undefined as string | undefined
+
+  const agent = new AtpAgent({
+    service: 'https://bsky.social',
+  })
+
+  await agent.login({ identifier: handle, password: process.env.APP_PASSWORD as string })
+
+  let avatarRef: BlobRef | undefined
+  if (avatar) {
+    let encoding: string
+    if (avatar.endsWith('png')) {
+      encoding = 'image/png'
+    } else if (avatar.endsWith('jpg') || avatar.endsWith('jpeg')) {
+      encoding = 'image/jpeg'
+    } else {
+      throw new Error('expected png or jpeg')
+    }
+    const img = await fs.readFile(avatar)
+    const blobRes = await agent.api.com.atproto.repo.uploadBlob(img, {
+      encoding,
+    })
+    avatarRef = blobRes.data.blob
+  }
+
+  const data = {
+    repo: agent.session?.did ?? handle,
+    collection: 'app.bsky.feed.generator',
+    rkey: WEB_DEV_FEED.rkey,
+    record: {
+      did: FEED_GENERATOR.did,
+      displayName: WEB_DEV_FEED.name,
+      description: WEB_DEV_FEED.description,
+      avatar: avatarRef,
+      createdAt: new Date().toISOString(),
+    },
+  }
+
+  await agent.api.com.atproto.repo.putRecord(data)
+
+  console.log('All done 🎉')
+}
+
+run()
+```
+
+- Provide your handle as a value for the handle variable line 6
+
+- Optionnally, provide a local path to an image to the avatar variable line 7
+
+- Create a [new App password](https://bsky.app/settings/app-passwords)
+
+- add the password to your .env
+
+```bash
+echo "APP_PASSWORD=YOUR_APP_PASSWORD" >> .env
+```
+
+- update your HOSTNAME env variable with your domain name
+
+```bash
+HOSTANME='example.com'
+```
+
+- Update your feed name to own
+
+In constants.ts, update the name key from the WEB_DEV_FEED variable
+
+- Publish your feed with:
+
+```bash
+npx tsx ./scripts/publishFeedGen.ts
+```
+
+You should see 'All done 🎉' in your terminal when this is done.
+
+## Verify everything is working
+
+- Go on Blueksy > [Feeds](https://bsky.app/feeds)
+
+- In the "Discover New Feeds" search input, type the value of the `WEB_DEV_FEED.name` variable from your `src/constants.ts`
+
+Your feed should show up in the results. Click on it, posts from your feed should show up. It might take few minutes before a post gets added to your database. Congrats you have your own feed now!
+
+## Troubleshooting
+
+- could not resolve identity: did:web:your-website.com
+
+([source code](https://github.com/bluesky-social/atproto/blob/53fcc2fbcbda9b325eeffb5705126831baf2a427/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L34) throwing this error)
+
+Did you add a HOSTNAME in your env variables without "https://" ?
+
+- Invalid app.bsky.feed.generator record: Record/did must be a valid did
+
+  Make sure there is no "http(s)://" in the did
+
+- invalid feed generator service details in did document: did:web:api.webdevfeed.online
+
+([source code](https://github.com/bluesky-social/atproto/blob/1c195a384549ed371cdf7ce51495da37388f9c62/packages/bsky/src/api/app/bsky/feed/getFeedGenerator.ts#L47) throwing this error)
+
+Make sure your hostname is right (without "https://") and make sure you did not publish the wrong hostname to bluesky!
+
+- How to debug?
+
+  The doc doesn't help much so what you have to do is paste the error message in github between "quotes", find the file from the atproto repo throwing that error message then try to understand the code... good luck!
